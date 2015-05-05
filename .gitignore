@@ -25,6 +25,9 @@ src/pbrt.vs*/ipch
 src/pbrt.vs*/*.suo
 src/pbrt.vs*/*.user
 
+# OSX
+.DS_Store
+
 # VS Build folders
 tmp/
 bin/
