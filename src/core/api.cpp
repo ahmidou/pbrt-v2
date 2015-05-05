@@ -41,6 +41,7 @@
 #include "film.h"
 #include "volume.h"
 #include "probes.h"
+#include "timer.h"
 
 // API Additional Headers
 #include "accelerators/bvh.h"
@@ -580,6 +581,9 @@ VolumeIntegrator *MakeVolumeIntegrator(const string &name,
 Primitive *MakeAccelerator(const string &name,
         const vector<Reference<Primitive> > &prims,
         const ParamSet &paramSet) {
+    printf("Building acceleration structure: %s\n", name.c_str());
+    Timer myTimer;
+    myTimer.Start();
     Primitive *accel = NULL;
     if (name == "bvh")
         accel = CreateBVHAccelerator(prims, paramSet);
@@ -590,6 +594,7 @@ Primitive *MakeAccelerator(const string &name,
     else
         Warning("Accelerator \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();
+    printf("Elapsed time to build acceleration structure: %.2f seconds\n", myTimer.Time());
     return accel;
 }
 

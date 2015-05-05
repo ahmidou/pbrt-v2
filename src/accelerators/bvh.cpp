@@ -36,6 +36,57 @@
 #include "probes.h"
 #include "paramset.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
+#define AAC_DELTA 4
+#define AAC_EPSILON 0.2f
+#define AAC_ALPHA (0.5f-AAC_EPSILON)
+#define AAC_C (0.5f * pow(AAC_DELTA, 0.5f + AAC_EPSILON))
+
+#pragma mark - morton code
+/* morton code */
+
+// Expands a 10-bit integer into 30 bits
+// by inserting 2 zeros after each bit.
+uint32_t expandBits(uint32_t v)
+{
+    v = (v * 0x00010001u) & 0xFF0000FFu;
+    v = (v * 0x00000101u) & 0x0F00F00Fu;
+    v = (v * 0x00000011u) & 0xC30C30C3u;
+    v = (v * 0x00000005u) & 0x49249249u;
+    return v;
+}
+
+// Calculates a 30-bit Morton code for the
+// given 3D point located within the unit cube [0,1].
+uint32_t morton3D(float x, float y, float z)
+{
+    x = min(max(x * 1024.0f, 0.0f), 1023.0f);
+    y = min(max(y * 1024.0f, 0.0f), 1023.0f);
+    z = min(max(z * 1024.0f, 0.0f), 1023.0f);
+    uint32_t xx = expandBits((unsigned int)x);
+    uint32_t yy = expandBits((unsigned int)y);
+    uint32_t zz = expandBits((unsigned int)z);
+    return zz * 4 + yy * 2 + xx;
+}
+
+int getDimForMorton3D(uint32_t idx)
+{
+    return idx % 3;
+}
+
+static inline uint32_t AAC_F(uint32_t x) {
+    return (uint32_t) (ceil(AAC_C * pow(x, AAC_ALPHA)));
+}
+
+//void radixSort(std::vector<uint64_t> a) {
+//    
+//}
+
+/* end of morton code stuff*/
+
+
 // BVHAccel Local Declarations
 struct BVHPrimitiveInfo {
     BVHPrimitiveInfo() { }
@@ -156,6 +207,7 @@ BVHAccel::BVHAccel(const vector<Reference<Primitive> > &p,
     for (uint32_t i = 0; i < p.size(); ++i)
         p[i]->FullyRefine(primitives);
     if (sm == "sah")         splitMethod = SPLIT_SAH;
+    else if (sm == "aac")    splitMethod = SPLIT_AAC;
     else if (sm == "middle") splitMethod = SPLIT_MIDDLE;
     else if (sm == "equal")  splitMethod = SPLIT_EQUAL_COUNTS;
     else {
@@ -163,6 +215,8 @@ BVHAccel::BVHAccel(const vector<Reference<Primitive> > &p,
                 sm.c_str());
         splitMethod = SPLIT_SAH;
     }
+    
+    Info("BVH split method \"%s\"", sm.c_str());
 
     if (primitives.size() == 0) {
         nodes = NULL;
@@ -184,9 +238,16 @@ BVHAccel::BVHAccel(const vector<Reference<Primitive> > &p,
     uint32_t totalNodes = 0;
     vector<Reference<Primitive> > orderedPrims;
     orderedPrims.reserve(primitives.size());
-    BVHBuildNode *root = recursiveBuild(buildArena, buildData, 0,
-                                        primitives.size(), &totalNodes,
-                                        orderedPrims);
+    BVHBuildNode *root;
+    if (splitMethod == SPLIT_AAC) {
+        root = buildAAC(buildArena, buildData, 0,
+                              primitives.size(), &totalNodes,
+                              orderedPrims);
+    } else {
+        root = recursiveBuild(buildArena, buildData, 0,
+                              primitives.size(), &totalNodes,
+                              orderedPrims);
+    }
     primitives.swap(orderedPrims);
         Info("BVH created with %d nodes for %d primitives (%.2f MB)", totalNodes,
              (int)primitives.size(), float(totalNodes * sizeof(LinearBVHNode))/(1024.f*1024.f));
@@ -204,6 +265,189 @@ BVHAccel::BVHAccel(const vector<Reference<Primitive> > &p,
 
 BBox BVHAccel::WorldBound() const {
     return nodes ? nodes[0].bounds : BBox();
+}
+#pragma mark - AAC
+
+uint32_t makePartition(std::vector<std::pair<uint32_t, uint32_t> > &sortedMC,
+                       uint32_t start, uint32_t end, int partitionbit) {
+    
+    if (partitionbit < 0) {
+        Warning("makePartition spliting in half. SUPPOSED TO BE RARE");
+        return start + (end-start)/2;
+    }
+    
+    uint32_t lower = start;
+    uint32_t upper = end;
+    
+    uint32_t curFind = (1 << partitionbit);
+    while (lower < upper) {
+        uint32_t mid = lower + (upper-lower)/2;
+        if ((sortedMC[mid].first & curFind) == 0) {
+            lower = mid+1;
+        } else {
+            upper = mid;
+        }
+    }
+    
+    return lower;
+}
+
+uint32_t findBestMatch(std::vector<BVHBuildNode*> &clusters, uint32_t i) {
+    float closestDist = INFINITY;
+    uint32_t idx = 0;
+    for (uint32_t j = 0; j < clusters.size(); ++j) {
+        if (i == j) continue;
+        
+        BBox combined = Union(clusters[i]->bounds, clusters[j]->bounds);
+        float d = combined.SurfaceArea();
+        if (d < closestDist) {
+            closestDist = d;
+            idx = j;
+        }
+    }
+    
+    return idx;
+}
+
+std::vector<BVHBuildNode*> combineCluster(MemoryArena &buildArena,
+                        std::vector<BVHBuildNode*> &clusters, uint32_t n,
+                        uint32_t *totalNodes, int dim) {
+    std::vector<uint32_t> closest(clusters.size(), 0);
+    
+    for (uint32_t i = 0; i < clusters.size(); ++i) {
+        closest[i] = findBestMatch(clusters, i);
+    }
+    
+    while (clusters.size() > n) {
+        float bestDist = INFINITY;
+        uint32_t leftIdx = 0;
+        uint32_t rightIdx = 0;
+        
+        for (uint32_t i = 0; i < clusters.size(); ++i) {
+            BBox combined = Union(clusters[i]->bounds, clusters[closest[i]]->bounds);
+            float d = combined.SurfaceArea();
+            if (d < bestDist) {
+                bestDist = d;
+                leftIdx = i;
+                rightIdx = closest[i];
+            }
+        }
+        
+        (*totalNodes)++;
+        BVHBuildNode *node = buildArena.Alloc<BVHBuildNode>();
+        
+        node->InitInterior(dim,
+                           clusters[leftIdx],
+                           clusters[rightIdx]);
+        clusters[leftIdx] = node;
+        clusters.erase(clusters.begin() + rightIdx);
+        closest.erase(closest.begin() + rightIdx);
+        
+        // adjust closest pair
+        for (uint32_t i = 0; i < clusters.size(); ++i) {
+            if (closest[i] > rightIdx) {
+                closest[i]--;
+            }
+        }
+        
+        closest[leftIdx] = findBestMatch(clusters, leftIdx);
+        
+        for (uint32_t i = 0; i < clusters.size(); ++i) {
+            if (closest[i] == leftIdx || closest[i] == rightIdx)
+                closest[i] = findBestMatch(clusters, i);
+        }
+    }
+    
+    
+    return clusters;
+}
+
+std::vector<BVHBuildNode*> recursiveBuildAAC(MemoryArena &buildArena,
+                                vector<BVHPrimitiveInfo> &buildData,
+                                std::vector<std::pair<uint32_t, uint32_t> > &mortonCodes,
+                                uint32_t start,
+                                uint32_t end, uint32_t *totalNodes, int partitionBit) {
+    std::vector<BVHBuildNode*> clusters;
+    if (end-start == 0) {
+        return clusters;
+    }
+    
+    int dim = getDimForMorton3D(partitionBit);
+    
+    if (end-start < AAC_DELTA) {
+        *totalNodes = (*totalNodes) + (end-start);
+        for (uint32_t i = start; i < end; ++i) {
+            // Create leaf _BVHBuildNode_
+            BVHBuildNode *node = buildArena.Alloc<BVHBuildNode>();
+            uint32_t primIdx = mortonCodes[i].second;
+            node->InitLeaf(primIdx, 1, buildData[primIdx].bounds); // deal with firstPrimOffset later with DFS
+            clusters.push_back(node);
+        }
+        
+        return combineCluster(buildArena, clusters, AAC_F(AAC_DELTA), totalNodes, dim);
+    }
+    
+    
+    uint32_t splitIdx = makePartition(mortonCodes, start, end, partitionBit);
+    
+    int newPartionBit = partitionBit - 1;
+    std::vector<BVHBuildNode*> leftC = recursiveBuildAAC(buildArena, buildData, mortonCodes, start, splitIdx, totalNodes, newPartionBit);
+    std::vector<BVHBuildNode*> rightC = recursiveBuildAAC(buildArena, buildData, mortonCodes, splitIdx, end, totalNodes, newPartionBit);
+    leftC.insert( leftC.end(), rightC.begin(), rightC.end() );
+    return combineCluster(buildArena, leftC, AAC_F(buildData.size()), totalNodes, dim);
+}
+
+
+
+void bvhDfs(BVHBuildNode* node, vector<BVHPrimitiveInfo> &buildData, vector<Reference<Primitive> > &orderedPrims, vector<Reference<Primitive> > &primitives) {
+    if (node->nPrimitives == 1) {
+        uint32_t firstPrimOffset = orderedPrims.size();
+        uint32_t primNum = buildData[node->firstPrimOffset].primitiveNumber;
+        orderedPrims.push_back(primitives[primNum]);
+        node->firstPrimOffset = firstPrimOffset;
+        return;
+    }
+    
+
+    if (node->children[0])
+        bvhDfs(node->children[0], buildData, orderedPrims, primitives);
+    if (node->children[1])
+        bvhDfs(node->children[1], buildData, orderedPrims, primitives);
+}
+
+BVHBuildNode *BVHAccel::buildAAC(MemoryArena &buildArena,
+                                       vector<BVHPrimitiveInfo> &buildData, uint32_t start,
+                                       uint32_t end, uint32_t *totalNodes,
+                                       vector<Reference<Primitive> > &orderedPrims) {
+    std::vector<Point> bboxCenters;
+    std::vector<std::pair<uint32_t, uint32_t> > mortonCodes;
+    BBox centerBBox = BBox();
+    for (uint32_t i = start; i < end; ++i) {
+        Point c = buildData[i].centroid;
+        bboxCenters.push_back(c);
+        centerBBox = Union(centerBBox, c);
+    }
+    
+    for (uint32_t i = start; i < end; ++i) {
+        Point c = bboxCenters[i];
+        uint32_t mc = morton3D(c.x - centerBBox.pMin.x, c.y - centerBBox.pMin.y, c.z - centerBBox.pMin.z);
+        
+        mortonCodes.push_back(std::make_pair(mc, i));
+    }
+    
+    
+    std::sort(mortonCodes.begin(), mortonCodes.end());
+    
+    int startPartitionIdx = 29;
+    
+    std::vector<BVHBuildNode*> clusters = recursiveBuildAAC(buildArena, buildData, mortonCodes, start, end, totalNodes, startPartitionIdx);
+    
+    BVHBuildNode* root = combineCluster(buildArena, clusters, 1, totalNodes, 2)[0];
+    
+    bvhDfs(root, buildData, orderedPrims, primitives);
+
+    
+    return root;
 }
 
 

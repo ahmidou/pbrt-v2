@@ -1,3 +1,13 @@
+######################### YOUR CONFIGURATION HERE #############################
+
+# Try different acceleration structure.
+Accelerator "bvh" "string splitmethod" "aac"
+#Accelerator "grid"
+#Accelerator "kdtree"
+
+######################### END OF YOUR CONFIGURATION ###########################
+
+
 Film "image"
 #	"integer xresolution" [128] "integer yresolution" [128] 
 LookAt 0 .2 .2    -.02 .1 0  0 1 0

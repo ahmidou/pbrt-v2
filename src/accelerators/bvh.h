@@ -58,6 +58,12 @@ public:
     bool IntersectP(const Ray &ray) const;
 private:
     // BVHAccel Private Methods
+    BVHBuildNode *buildAAC(MemoryArena &buildArena,
+                                 vector<BVHPrimitiveInfo> &buildData, uint32_t start, uint32_t end,
+                                 uint32_t *totalNodes, vector<Reference<Primitive> > &orderedPrims);
+    
+    
+    
     BVHBuildNode *recursiveBuild(MemoryArena &buildArena,
         vector<BVHPrimitiveInfo> &buildData, uint32_t start, uint32_t end,
         uint32_t *totalNodes, vector<Reference<Primitive> > &orderedPrims);
@@ -65,7 +71,7 @@ private:
 
     // BVHAccel Private Data
     uint32_t maxPrimsInNode;
-    enum SplitMethod { SPLIT_MIDDLE, SPLIT_EQUAL_COUNTS, SPLIT_SAH };
+    enum SplitMethod { SPLIT_MIDDLE, SPLIT_EQUAL_COUNTS, SPLIT_AAC, SPLIT_SAH };
     SplitMethod splitMethod;
     vector<Reference<Primitive> > primitives;
     LinearBVHNode *nodes;

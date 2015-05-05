@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3C4A39F31AF6FB0200F4E602 /* radixSort.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3C4A39F11AF6FB0200F4E602 /* radixSort.cpp */; };
 		B130248E1236EE5100206AC7 /* fileutil.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B130248C1236EE5100206AC7 /* fileutil.cpp */; };
 		B13B5765161245F5008FFA44 /* targa.c in Sources */ = {isa = PBXBuildFile; fileRef = B13B5763161245F5008FFA44 /* targa.c */; };
 		B19397BB12083210008317C5 /* shinymetal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B19397B912083210008317C5 /* shinymetal.cpp */; };
@@ -168,6 +169,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		3C4A39F11AF6FB0200F4E602 /* radixSort.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = radixSort.cpp; sourceTree = "<group>"; };
+		3C4A39F21AF6FB0200F4E602 /* radixSort.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = radixSort.h; sourceTree = "<group>"; };
 		B130248C1236EE5100206AC7 /* fileutil.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = fileutil.cpp; sourceTree = "<group>"; };
 		B130248D1236EE5100206AC7 /* fileutil.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fileutil.h; sourceTree = "<group>"; };
 		B13B5763161245F5008FFA44 /* targa.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = targa.c; sourceTree = "<group>"; };
@@ -469,6 +472,8 @@
 		B1D8EB53117030DE00A8A49E /* accelerators */ = {
 			isa = PBXGroup;
 			children = (
+				3C4A39F11AF6FB0200F4E602 /* radixSort.cpp */,
+				3C4A39F21AF6FB0200F4E602 /* radixSort.h */,
 				B1D8EB54117030DE00A8A49E /* bvh.cpp */,
 				B1D8EB55117030DE00A8A49E /* bvh.h */,
 				B1D8EB56117030DE00A8A49E /* grid.cpp */,
@@ -845,7 +850,7 @@
 		08FB7793FE84155DC02AAC07 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0440;
+				LastUpgradeCheck = 0630;
 			};
 			buildConfigurationList = 1DEB923508733DC60010E9CD /* Build configuration list for PBXProject "pbrt" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -946,6 +951,7 @@
 				B1D8EC9E1170310E00A8A49E /* mirror.cpp in Sources */,
 				B1D8EC9F1170310E00A8A49E /* mixmat.cpp in Sources */,
 				B1D8ECA01170310E00A8A49E /* plastic.cpp in Sources */,
+				3C4A39F31AF6FB0200F4E602 /* radixSort.cpp in Sources */,
 				B1D8ECA11170310E00A8A49E /* substrate.cpp in Sources */,
 				B1D8ECA21170310E00A8A49E /* subsurface.cpp in Sources */,
 				B1D8ECA31170310E00A8A49E /* translucent.cpp in Sources */,
@@ -1004,14 +1010,34 @@
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = PBRT_PROBES_NONE;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					PBRT_PROBES_NONE,
+					PBRT_HAS_OPENEXR,
+				);
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = (
 					"$(DERIVED_FILES_DIR)/Yacc",
 					.,
+					/usr/local/Cellar/openexr/2.1.0/include/OpenEXR,
+					/usr/local/Cellar/ilmbase/2.1.0/include/OpenEXR,
 				);
 				INSTALL_PATH = /usr/local/bin;
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/Cellar/openexr/2.1.0/lib,
+					/usr/local/Cellar/ilmbase/2.1.0/lib,
+				);
+				OTHER_LDFLAGS = (
+					"-L/usr/local/Cellar/openexr/2.1.0/lib",
+					"-L/usr/local/Cellar/ilmbase/2.1.0/lib",
+					"-lIlmImf",
+					"-lImath",
+					"-lHalf",
+					"-lIex",
+					"-lIexMath",
+					"-lIlmThread",
+				);
 				PRODUCT_NAME = pbrt;
-				SDKROOT = macosx10.7;
+				SDKROOT = macosx;
 			};
 			name = Debug;
 		};
@@ -1021,21 +1047,40 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_MODEL_TUNING = G5;
-				GCC_PREPROCESSOR_DEFINITIONS = PBRT_PROBES_NONE;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					PBRT_PROBES_NONE,
+					PBRT_HAS_OPENEXR,
+				);
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = (
 					"$(DERIVED_FILES_DIR)/Yacc",
 					.,
+					/usr/local/Cellar/openexr/2.1.0/include/OpenEXR,
+					/usr/local/Cellar/ilmbase/2.1.0/include/OpenEXR,
 				);
 				INSTALL_PATH = /usr/local/bin;
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/Cellar/openexr/2.1.0/lib,
+					/usr/local/Cellar/ilmbase/2.1.0/lib,
+				);
+				OTHER_LDFLAGS = (
+					"-L/usr/local/Cellar/openexr/2.1.0/lib",
+					"-L/usr/local/Cellar/ilmbase/2.1.0/lib",
+					"-lIlmImf",
+					"-lImath",
+					"-lHalf",
+					"-lIex",
+					"-lIexMath",
+					"-lIlmThread",
+				);
 				PRODUCT_NAME = pbrt;
-				SDKROOT = macosx10.7;
+				SDKROOT = macosx;
 			};
 			name = Release;
 		};
 		1DEB923608733DC60010E9CD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -1047,14 +1092,13 @@
 				HEADER_SEARCH_PATHS = ..;
 				ONLY_ACTIVE_ARCH = YES;
 				RUN_CLANG_STATIC_ANALYZER = YES;
-				SDKROOT = macosx10.6;
+				SDKROOT = macosx;
 			};
 			name = Debug;
 		};
 		1DEB923708733DC60010E9CD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					NDEBUG,
@@ -1065,14 +1109,13 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = ..;
 				RUN_CLANG_STATIC_ANALYZER = YES;
-				SDKROOT = macosx10.6;
+				SDKROOT = macosx;
 			};
 			name = Release;
 		};
 		B18C76E91189CC6400AEF213 /* dtrace */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					NDEBUG,
@@ -1083,7 +1126,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = ..;
 				RUN_CLANG_STATIC_ANALYZER = YES;
-				SDKROOT = macosx10.6;
+				SDKROOT = macosx;
 			};
 			name = dtrace;
 		};
@@ -1093,14 +1136,34 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_MODEL_TUNING = G5;
-				GCC_PREPROCESSOR_DEFINITIONS = PBRT_PROBES_NONE;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					PBRT_PROBES_NONE,
+					PBRT_HAS_OPENEXR,
+				);
+				GCC_VERSION = "";
 				HEADER_SEARCH_PATHS = (
 					"$(DERIVED_FILES_DIR)/Yacc",
 					.,
+					/usr/local/Cellar/openexr/2.1.0/include/OpenEXR,
+					/usr/local/Cellar/ilmbase/2.1.0/include/OpenEXR,
 				);
 				INSTALL_PATH = /usr/local/bin;
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/Cellar/openexr/2.1.0/lib,
+					/usr/local/Cellar/ilmbase/2.1.0/lib,
+				);
+				OTHER_LDFLAGS = (
+					"-L/usr/local/Cellar/openexr/2.1.0/lib",
+					"-L/usr/local/Cellar/ilmbase/2.1.0/lib",
+					"-lIlmImf",
+					"-lImath",
+					"-lHalf",
+					"-lIex",
+					"-lIexMath",
+					"-lIlmThread",
+				);
 				PRODUCT_NAME = pbrt;
-				SDKROOT = macosx10.7;
+				SDKROOT = macosx;
 			};
 			name = dtrace;
 		};
