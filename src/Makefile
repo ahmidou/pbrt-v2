@@ -5,12 +5,42 @@
 # common locations for the OpenEXR libraries; may need to be updated
 # for unusual installation locations
 HAVE_EXR=1
-EXR_INCLUDES=-I/usr/local/include/OpenEXR -I/usr/include/OpenEXR -I/opt/local/include/OpenEXR 
-EXR_LIBDIR=-L/usr/local/lib -L/opt/local/lib
+EXR_INCLUDES=-I/usr/local/Cellar/openexr/2.1.0/include/OpenEXR -I/usr/local/Cellar/ilmbase/2.1.0/include/OpenEXR
+EXR_LIBDIR=-L/usr/local/Cellar/openexr/2.1.0/lib -L/usr/local/Cellar/ilmbase/2.1.0/lib
 
 HAVE_LIBTIFF=0
 TIFF_INCLUDES=-I/usr/local/include -I/opt/local/include
 TIFF_LIBDIR=-L/usr/local/lib -L/opt/local/lib
+
+###########################################################################
+# INTEL TBB STUFF BEGIN
+###########################################################################
+
+# TBBLIB_INCLUDES=-I/usr/local/Cellar/tbb/4.3-20150424/include/tbb
+# TBBLIB_LIBDIR=-L/usr/local/Cellar/tbb/4.3-20150424/lib
+# TBBLIB=-ltbb
+# TBBLIB_DEBUG=-ltbb_debug
+# TBBLIB_MALLOC=-ltbbmalloc_proxy
+
+# ifeq ($(offload), mic)
+# override CXXFLAGS += -opt-report-phase:offload -D__TBB_MIC_OFFLOAD=1
+# # Replace -ltbb with -tbb in the offload mode
+# TBBLIB = -tbb
+# TBBLIB_DEBUG += -offload-option,mic,ld,"-ltbb_debug"
+# endif
+
+# ifeq ($(shell uname), Linux)
+# ifeq ($(target), android)
+# TBBLIB_EXTRA_LIBS= --sysroot=$(SYSROOT)
+# run_cmd=../../common/android.linux.launcher.sh
+# else
+# TBBLIB_EXTRA_LIBS= -lrt 
+# endif
+# endif
+
+###########################################################################
+# INTEL TBB STUFF END
+###########################################################################
 
 HAVE_DTRACE=0
 
@@ -22,6 +52,12 @@ DEFS=-DPBRT_HAS_OPENEXR
 
 # 64 bit
 MARCH=-m64
+
+#which c standard
+# C_STD=-std=c++11 
+
+# which parallel lib
+PARALLEL=-fcilkplus -lcilkrts
 
 # change this to -g3 for debug builds
 OPT=-O2
@@ -59,15 +95,16 @@ ifeq ($(ARCH),Darwin)
   EXRLIBS += -lz
 endif
 
-CC=gcc
-CXX=g++
-LD=$(CXX) $(OPT) $(MARCH)
+CC=gcc-5
+CXX=g++-5
+LD=$(CXX) $(PARALLEL) $(OPT) $(MARCH)
 INCLUDE=-I. -Icore $(EXR_INCLUDES) $(TIFF_INCLUDES)
 WARN=-Wall
 CWD=$(shell pwd)
-CXXFLAGS=$(OPT) $(MARCH) $(INCLUDE) $(WARN) $(DEFS)
-CCFLAGS=$(CXXFLAGS)
-LIBS=$(LEXLIB) $(EXR_LIBDIR) $(EXRLIBS) -lm 
+BASEFLAGS=$(OPT) $(PARALLEL) $(MARCH) $(INCLUDE) $(WARN) $(DEFS) $(TBBLIB_MALLOC)
+CXXFLAGS=$(BASEFLAGS)
+CCFLAGS=$(BASEFLAGS)
+LIBS=$(LEXLIB) $(EXR_LIBDIR) $(EXRLIBS) -lm $(TBBLIB) $(TBBLIB_EXTRA_LIBS)
 
 LIB_CSRCS=core/targa.c
 LIB_CXXSRCS  = $(wildcard core/*.cpp) core/pbrtlex.cpp core/pbrtparse.cpp

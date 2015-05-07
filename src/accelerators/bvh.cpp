@@ -36,13 +36,17 @@
 #include "probes.h"
 #include "paramset.h"
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <algorithm>
+#include <cilk/cilk.h>
+#include "radixSort.h"
 
-#define AAC_DELTA 4
-#define AAC_EPSILON 0.2f
+
+#define AAC_DELTA 20 // 20 for HQ, 4 for fast
+#define AAC_EPSILON 0.1f //0.1f for HQ, 0.2 for fast
 #define AAC_ALPHA (0.5f-AAC_EPSILON)
-#define AAC_C (0.5f * pow(AAC_DELTA, 0.5f + AAC_EPSILON))
+//#define AAC_C (0.5f * pow(AAC_DELTA, 0.5f + AAC_EPSILON))
+#define MORTON_CODE_END 0
+#define MORTON_CODE_START 29
 
 #pragma mark - morton code
 /* morton code */
@@ -62,22 +66,32 @@ uint32_t expandBits(uint32_t v)
 // given 3D point located within the unit cube [0,1].
 uint32_t morton3D(float x, float y, float z)
 {
+//    Warning("morton3D: x == %f", x);
+    
     x = min(max(x * 1024.0f, 0.0f), 1023.0f);
     y = min(max(y * 1024.0f, 0.0f), 1023.0f);
     z = min(max(z * 1024.0f, 0.0f), 1023.0f);
-    uint32_t xx = expandBits((unsigned int)x);
-    uint32_t yy = expandBits((unsigned int)y);
-    uint32_t zz = expandBits((unsigned int)z);
-    return zz * 4 + yy * 2 + xx;
+    
+//    Warning("morton3D: new x == %u", (unsigned int)x);
+    
+    uint32_t xx = expandBits((uint32_t)x);
+//    Warning("morton3D: xx == %u", xx);
+    uint32_t yy = expandBits((uint32_t)y);
+    uint32_t zz = expandBits((uint32_t)z);
+    return ((zz << 2) | (yy << 1) | xx);
 }
 
-int getDimForMorton3D(uint32_t idx)
+static inline int getDimForMorton3D(uint32_t idx)
 {
     return idx % 3;
 }
 
+static inline float AAC_C() {
+    return (0.5f * powf(AAC_DELTA, 0.5f + AAC_EPSILON));
+}
+
 static inline uint32_t AAC_F(uint32_t x) {
-    return (uint32_t) (ceil(AAC_C * pow(x, AAC_ALPHA)));
+    return (uint32_t) (ceil(AAC_C() * powf(x, AAC_ALPHA)));
 }
 
 //void radixSort(std::vector<uint64_t> a) {
@@ -103,6 +117,7 @@ struct BVHPrimitiveInfo {
 struct BVHBuildNode {
     // BVHBuildNode Public Methods
     BVHBuildNode() { children[0] = children[1] = NULL; }
+    ~BVHBuildNode() { }
     void InitLeaf(uint32_t first, uint32_t n, const BBox &b) {
         firstPrimOffset = first;
         nPrimitives = n;
@@ -240,25 +255,26 @@ BVHAccel::BVHAccel(const vector<Reference<Primitive> > &p,
     orderedPrims.reserve(primitives.size());
     BVHBuildNode *root;
     if (splitMethod == SPLIT_AAC) {
-        root = buildAAC(buildArena, buildData, 0,
+        buildAAC(buildData, 0,
                               primitives.size(), &totalNodes,
                               orderedPrims);
     } else {
         root = recursiveBuild(buildArena, buildData, 0,
                               primitives.size(), &totalNodes,
                               orderedPrims);
-    }
-    primitives.swap(orderedPrims);
-        Info("BVH created with %d nodes for %d primitives (%.2f MB)", totalNodes,
-             (int)primitives.size(), float(totalNodes * sizeof(LinearBVHNode))/(1024.f*1024.f));
+        
+        primitives.swap(orderedPrims);
 
-    // Compute representation of depth-first traversal of BVH tree
-    nodes = AllocAligned<LinearBVHNode>(totalNodes);
-    for (uint32_t i = 0; i < totalNodes; ++i)
-        new (&nodes[i]) LinearBVHNode;
-    uint32_t offset = 0;
-    flattenBVHTree(root, &offset);
-    Assert(offset == totalNodes);
+        // Compute representation of depth-first traversal of BVH tree
+        nodes = AllocAligned<LinearBVHNode>(totalNodes);
+        for (uint32_t i = 0; i < totalNodes; ++i)
+            new (&nodes[i]) LinearBVHNode;
+        uint32_t offset = 0;
+        flattenBVHTree(root, &offset);
+        Assert(offset == totalNodes);
+    }
+    Info("BVH created with %d nodes for %d primitives (%.2f MB)", totalNodes,
+         (int)primitives.size(), float(totalNodes * sizeof(LinearBVHNode))/(1024.f*1024.f));
     PBRT_BVH_FINISHED_CONSTRUCTION(this);
 }
 
@@ -268,18 +284,21 @@ BBox BVHAccel::WorldBound() const {
 }
 #pragma mark - AAC
 
-uint32_t makePartition(std::vector<std::pair<uint32_t, uint32_t> > &sortedMC,
+uint32_t makePartition(std::pair<uint32_t, uint32_t> *sortedMC,
                        uint32_t start, uint32_t end, int partitionbit) {
     
-    if (partitionbit < 0) {
-        Warning("makePartition spliting in half. SUPPOSED TO BE RARE");
+    uint32_t curFind = (1 << partitionbit);
+    
+    if (((sortedMC[start].first & curFind) == (sortedMC[end-1].first & curFind))
+        || (partitionbit < MORTON_CODE_END)) {
+        if (partitionbit < MORTON_CODE_END)
+            Info("makePartition spliting in half. SUPPOSED TO BE RARE");
         return start + (end-start)/2;
     }
     
     uint32_t lower = start;
     uint32_t upper = end;
     
-    uint32_t curFind = (1 << partitionbit);
     while (lower < upper) {
         uint32_t mid = lower + (upper-lower)/2;
         if ((sortedMC[mid].first & curFind) == 0) {
@@ -294,7 +313,7 @@ uint32_t makePartition(std::vector<std::pair<uint32_t, uint32_t> > &sortedMC,
 
 uint32_t findBestMatch(std::vector<BVHBuildNode*> &clusters, uint32_t i) {
     float closestDist = INFINITY;
-    uint32_t idx = 0;
+    uint32_t idx = i;
     for (uint32_t j = 0; j < clusters.size(); ++j) {
         if (i == j) continue;
         
@@ -309,9 +328,9 @@ uint32_t findBestMatch(std::vector<BVHBuildNode*> &clusters, uint32_t i) {
     return idx;
 }
 
-std::vector<BVHBuildNode*> combineCluster(MemoryArena &buildArena,
-                        std::vector<BVHBuildNode*> &clusters, uint32_t n,
+std::vector<BVHBuildNode*> combineCluster(std::vector<BVHBuildNode*> &clusters, uint32_t n,
                         uint32_t *totalNodes, int dim) {
+    
     std::vector<uint32_t> closest(clusters.size(), 0);
     
     for (uint32_t i = 0; i < clusters.size(); ++i) {
@@ -334,27 +353,24 @@ std::vector<BVHBuildNode*> combineCluster(MemoryArena &buildArena,
         }
         
         (*totalNodes)++;
-        BVHBuildNode *node = buildArena.Alloc<BVHBuildNode>();
+        BVHBuildNode *node = new BVHBuildNode();
         
         node->InitInterior(dim,
                            clusters[leftIdx],
                            clusters[rightIdx]);
         clusters[leftIdx] = node;
-        clusters.erase(clusters.begin() + rightIdx);
-        closest.erase(closest.begin() + rightIdx);
-        
-        // adjust closest pair
-        for (uint32_t i = 0; i < clusters.size(); ++i) {
-            if (closest[i] > rightIdx) {
-                closest[i]--;
-            }
-        }
-        
+        clusters[rightIdx] = clusters.back();
+        closest[rightIdx] = closest.back();
+        clusters.pop_back();
+        closest.pop_back();
         closest[leftIdx] = findBestMatch(clusters, leftIdx);
         
         for (uint32_t i = 0; i < clusters.size(); ++i) {
             if (closest[i] == leftIdx || closest[i] == rightIdx)
                 closest[i] = findBestMatch(clusters, i);
+            else if (closest[i] == closest.size()) {
+                closest[i] = rightIdx;
+            }
         }
     }
     
@@ -362,92 +378,125 @@ std::vector<BVHBuildNode*> combineCluster(MemoryArena &buildArena,
     return clusters;
 }
 
-std::vector<BVHBuildNode*> recursiveBuildAAC(MemoryArena &buildArena,
-                                vector<BVHPrimitiveInfo> &buildData,
-                                std::vector<std::pair<uint32_t, uint32_t> > &mortonCodes,
+void recursiveBuildAAC(vector<BVHPrimitiveInfo> &buildData,
+                                std::pair<uint32_t, uint32_t> *mortonCodes,
                                 uint32_t start,
-                                uint32_t end, uint32_t *totalNodes, int partitionBit) {
-    std::vector<BVHBuildNode*> clusters;
+                                uint32_t end, uint32_t *totalNodes, int partitionBit,
+                                std::vector<BVHBuildNode*> *clusterData) {
+    
     if (end-start == 0) {
-        return clusters;
+        return;
     }
     
     int dim = getDimForMorton3D(partitionBit);
     
     if (end-start < AAC_DELTA) {
-        *totalNodes = (*totalNodes) + (end-start);
+        std::vector<BVHBuildNode*> clusters;
+        (*totalNodes) += (end-start);
         for (uint32_t i = start; i < end; ++i) {
             // Create leaf _BVHBuildNode_
-            BVHBuildNode *node = buildArena.Alloc<BVHBuildNode>();
+            BVHBuildNode *node = new BVHBuildNode();
             uint32_t primIdx = mortonCodes[i].second;
-            node->InitLeaf(primIdx, 1, buildData[primIdx].bounds); // deal with firstPrimOffset later with DFS
+            node->InitLeaf(primIdx, 1, buildData[primIdx].bounds);
+            // deal with firstPrimOffset later with DFS
             clusters.push_back(node);
         }
         
-        return combineCluster(buildArena, clusters, AAC_F(AAC_DELTA), totalNodes, dim);
+        *clusterData = combineCluster(clusters, AAC_F(AAC_DELTA), totalNodes, dim);
+        return;
     }
     
     
     uint32_t splitIdx = makePartition(mortonCodes, start, end, partitionBit);
+//    Warning("recursiveBuildAAC: start == %u", start);
+//    Warning("recursiveBuildAAC: end == %u", end);
+//    Warning("recursiveBuildAAC: splitIdx == %u", splitIdx);
     
     int newPartionBit = partitionBit - 1;
-    std::vector<BVHBuildNode*> leftC = recursiveBuildAAC(buildArena, buildData, mortonCodes, start, splitIdx, totalNodes, newPartionBit);
-    std::vector<BVHBuildNode*> rightC = recursiveBuildAAC(buildArena, buildData, mortonCodes, splitIdx, end, totalNodes, newPartionBit);
+    std::vector<BVHBuildNode*> leftC;
+    std::vector<BVHBuildNode*> rightC;
+    uint32_t rightTotalnodes = 0;
+    
+    cilk_spawn recursiveBuildAAC(buildData, mortonCodes, start, splitIdx, totalNodes, newPartionBit, &leftC);
+    recursiveBuildAAC(buildData, mortonCodes, splitIdx, end, &rightTotalnodes, newPartionBit, &rightC);
+    cilk_sync;
+    
+    (*totalNodes) += rightTotalnodes;
+    
     leftC.insert( leftC.end(), rightC.begin(), rightC.end() );
-    return combineCluster(buildArena, leftC, AAC_F(buildData.size()), totalNodes, dim);
+    *clusterData = combineCluster(leftC, AAC_F(buildData.size()), totalNodes, dim);
 }
 
 
 
-void bvhDfs(BVHBuildNode* node, vector<BVHPrimitiveInfo> &buildData, vector<Reference<Primitive> > &orderedPrims, vector<Reference<Primitive> > &primitives) {
-    if (node->nPrimitives == 1) {
+uint32_t BVHAccel::bvhDfs(BVHBuildNode* node, vector<BVHPrimitiveInfo> &buildData, vector<Reference<Primitive> > &orderedPrims, uint32_t *offset) {
+    
+    LinearBVHNode *linearNode = &nodes[*offset];
+    linearNode->bounds = node->bounds;
+    uint32_t myOffset = (*offset)++;
+    
+    if (node->nPrimitives > 0) {
+        Assert(!node->children[0] && !node->children[1]);
         uint32_t firstPrimOffset = orderedPrims.size();
         uint32_t primNum = buildData[node->firstPrimOffset].primitiveNumber;
         orderedPrims.push_back(primitives[primNum]);
         node->firstPrimOffset = firstPrimOffset;
-        return;
+        linearNode->primitivesOffset = node->firstPrimOffset;
+        linearNode->nPrimitives = node->nPrimitives;
+    } else {
+        linearNode->axis = node->splitAxis;
+        linearNode->nPrimitives = 0;
+        bvhDfs(node->children[0], buildData, orderedPrims, offset);
+        linearNode->secondChildOffset =
+            bvhDfs(node->children[1], buildData, orderedPrims, offset);
     }
     
-
-    if (node->children[0])
-        bvhDfs(node->children[0], buildData, orderedPrims, primitives);
-    if (node->children[1])
-        bvhDfs(node->children[1], buildData, orderedPrims, primitives);
+    delete node;
+    return myOffset;
 }
 
-BVHBuildNode *BVHAccel::buildAAC(MemoryArena &buildArena,
-                                       vector<BVHPrimitiveInfo> &buildData, uint32_t start,
+void BVHAccel::buildAAC(vector<BVHPrimitiveInfo> &buildData, uint32_t start,
                                        uint32_t end, uint32_t *totalNodes,
                                        vector<Reference<Primitive> > &orderedPrims) {
-    std::vector<Point> bboxCenters;
-    std::vector<std::pair<uint32_t, uint32_t> > mortonCodes;
+
+    std::pair<uint32_t, uint32_t> *mortonCodes = new std::pair<uint32_t, uint32_t>[end-start];
+    
     BBox centerBBox = BBox();
     for (uint32_t i = start; i < end; ++i) {
-        Point c = buildData[i].centroid;
-        bboxCenters.push_back(c);
-        centerBBox = Union(centerBBox, c);
+        centerBBox = Union(centerBBox, buildData[i].centroid);
     }
     
     for (uint32_t i = start; i < end; ++i) {
-        Point c = bboxCenters[i];
-        uint32_t mc = morton3D(c.x - centerBBox.pMin.x, c.y - centerBBox.pMin.y, c.z - centerBBox.pMin.z);
+        Point c = buildData[i].centroid;
+        float newX = (c.x - centerBBox.pMin.x)/(centerBBox.pMax.x - centerBBox.pMin.x);
+        float newY = (c.y - centerBBox.pMin.y)/(centerBBox.pMax.y - centerBBox.pMin.y);
+        float newZ = (c.z - centerBBox.pMin.z)/(centerBBox.pMax.z - centerBBox.pMin.z);
+        uint32_t mc = morton3D(newX, newY, newZ);
         
-        mortonCodes.push_back(std::make_pair(mc, i));
+        mortonCodes[i-start] = std::make_pair(mc, i);
     }
     
     
-    std::sort(mortonCodes.begin(), mortonCodes.end());
+    integerSort(mortonCodes, (long) (end-start));
+//    std::sort(mortonCodes, mortonCodes+(end-start));
     
-    int startPartitionIdx = 29;
+    std::vector<BVHBuildNode*> clusters;
+    recursiveBuildAAC(buildData, mortonCodes, start, end, totalNodes,
+                      MORTON_CODE_START, &clusters);
     
-    std::vector<BVHBuildNode*> clusters = recursiveBuildAAC(buildArena, buildData, mortonCodes, start, end, totalNodes, startPartitionIdx);
+    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2)[0];
     
-    BVHBuildNode* root = combineCluster(buildArena, clusters, 1, totalNodes, 2)[0];
+    delete[] mortonCodes;
     
-    bvhDfs(root, buildData, orderedPrims, primitives);
-
+    // Compute representation of depth-first traversal of BVH tree
+    nodes = AllocAligned<LinearBVHNode>(*totalNodes);
+    for (uint32_t i = 0; i < (*totalNodes); ++i)
+        new (&nodes[i]) LinearBVHNode;
+    uint32_t offset = 0;
     
-    return root;
+    bvhDfs(root, buildData, orderedPrims, &offset);
+    
+    primitives.swap(orderedPrims);
 }
 
 
@@ -635,6 +684,11 @@ uint32_t BVHAccel::flattenBVHTree(BVHBuildNode *node, uint32_t *offset) {
         linearNode->secondChildOffset = flattenBVHTree(node->children[1],
                                                        offset);
     }
+    
+    if ((splitMethod == SPLIT_AAC) && node) {
+        delete node;
+    }
+    
     return myOffset;
 }
 

@@ -1,3 +1,12 @@
+######################### YOUR CONFIGURATION HERE #############################
+
+# Try different acceleration structure.
+Accelerator "bvh" "string splitmethod" "aac"
+#Accelerator "grid"
+#Accelerator "kdtree"
+
+######################### END OF YOUR CONFIGURATION ###########################
+
 
 LookAt 18 5.5 2    15.5 .9 10   0 1 0
 Camera "perspective" "float fov" [40]

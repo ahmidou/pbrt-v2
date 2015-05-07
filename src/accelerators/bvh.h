@@ -58,8 +58,8 @@ public:
     bool IntersectP(const Ray &ray) const;
 private:
     // BVHAccel Private Methods
-    BVHBuildNode *buildAAC(MemoryArena &buildArena,
-                                 vector<BVHPrimitiveInfo> &buildData, uint32_t start, uint32_t end,
+    uint32_t bvhDfs(BVHBuildNode* node, vector<BVHPrimitiveInfo> &buildData, vector<Reference<Primitive> > &orderedPrims, uint32_t *offset);
+    void buildAAC(vector<BVHPrimitiveInfo> &buildData, uint32_t start, uint32_t end,
                                  uint32_t *totalNodes, vector<Reference<Primitive> > &orderedPrims);
     
     
