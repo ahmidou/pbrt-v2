@@ -45,6 +45,76 @@ struct BVHBuildNode;
 struct BVHPrimitiveInfo;
 struct LinearBVHNode;
 
+struct AAC_Data {
+    float **area, *minArea;
+    //    int *label, *minPos, *minLabel;
+    int *minPos;
+    int size;
+    int inited;
+    
+    void init(int size) {
+        this->size = size;
+        //        label = new int [size]; //idx in clusters
+        minArea = new float [size]; // min area for each
+        minPos = new int [size]; // min position of each
+        //        minLabel = new int [size]; //
+        area = new float* [size];
+        for (int i=0; i<size; i++)
+            area[i] = new float [size];
+        
+        inited = 1;
+    }
+    
+    AAC_Data() {
+        inited = 0;
+    }
+    
+    ~AAC_Data() {
+        if (inited) {
+            //        delete[] label;
+            delete[] minArea;
+            delete[] minPos;
+            //        delete[] minLabel;
+            for (int i=0; i<size; i++)
+                delete[] area[i];
+            delete[] area;
+            inited = 0;
+        }
+    }
+};
+
+struct AAC_DataCoord {
+    int start;
+    int end;
+    
+    AAC_DataCoord() {}
+    AAC_DataCoord(int start, int end) : start(start), end(end) {}
+    AAC_DataCoord(AAC_DataCoord const &c) : start(c.start), end(c.end) {}
+};
+
+struct TaskTree {
+    std::vector<BVHBuildNode*> *bvhNodes;
+    AAC_Data *aacData;
+    AAC_DataCoord aacDataC;
+    uint32_t numPrims;
+    
+    TaskTree *leftNode, *rightNode;
+    
+    TaskTree():leftNode(NULL), rightNode(NULL) {}
+    
+    TaskTree(std::vector<BVHBuildNode*> *bvhNodes, AAC_Data *aacData, AAC_DataCoord aacDataC, uint32_t numPrims):
+    bvhNodes(bvhNodes), aacData(aacData), aacDataC(aacDataC), numPrims(numPrims), leftNode(NULL), rightNode(NULL) {}
+    
+    
+    ~TaskTree() {
+        if (aacData)
+            delete aacData;
+        if (bvhNodes)
+            delete bvhNodes;
+    }
+} ;
+
+
 // BVHAccel Declarations
 class BVHAccel : public Aggregate {
 public:

@@ -41,7 +41,7 @@
 #include <cilk/cilk.h>
 #include "radixSort.h"
 
-
+#define AAC_PARALLEL_GRAN 6
 #define AAC_DELTA 20 // 20 for HQ, 4 for fast
 #define AAC_EPSILON 0.1f //0.1f for HQ, 0.2 for fast
 #define AAC_ALPHA (0.5f-AAC_EPSILON)
@@ -55,6 +55,9 @@
 Timer combineTimer;
 Timer leafsTimer;
 Timer dataMergeTimer;
+Timer appendTimer;
+Timer baseCaseTimer;
+Timer bitchTimer;
 
 // Expands a 10-bit integer into 30 bits
 // by inserting 2 zeros after each bit.
@@ -103,39 +106,6 @@ static inline uint32_t AAC_F(uint32_t x) {
 
 
 // BVHAccel Local Declarations
-struct AAC_Data {
-    float **area, *minArea;
-    int *label, *minPos, *minLabel;
-    int size;
-    void init(int size) {
-        this->size = size;
-        label = new int [size]; //idx in clusters
-        minArea = new float [size]; // min area for each
-        minPos = new int [size]; // min position of each
-        minLabel = new int [size]; //
-        area = new float* [size];
-        for (int i=0; i<size; i++)
-            area[i] = new float [size];
-    }
-    ~AAC_Data() {
-        delete[] label;
-        delete[] minArea;
-        delete[] minPos;
-        delete[] minLabel;
-        for (int i=0; i<size; i++)
-            delete[] area[i];
-        delete[] area;
-    }
-};
-
-struct AAC_DataCoord {
-    int start;
-    int end;
-    
-    AAC_DataCoord() {}
-    AAC_DataCoord(int start, int end) : start(start), end(end) {}
-    AAC_DataCoord(AAC_DataCoord const &c) : start(c.start), end(c.end) {}
-};
 
 struct BVHPrimitiveInfo {
     BVHPrimitiveInfo() { }
@@ -346,7 +316,7 @@ uint32_t makePartition(std::pair<uint32_t, uint32_t> *sortedMC,
     return lower;
 }
 
-uint32_t findBestMatch(AAC_Data *aacData, AAC_DataCoord *dc, int n, int cIdx) {
+void findBestMatch(AAC_Data *aacData, AAC_DataCoord *dc, int n, int cIdx) {
 //    float closestDist = INFINITY;
 //    uint32_t idx = 0;
     int start = dc->start;
@@ -401,12 +371,12 @@ std::vector<BVHBuildNode*> combineCluster(std::vector<BVHBuildNode*> &clusters, 
         clusters[rightIdx] = clusters.back();
 //        closest[rightIdx] = closest.back();
         
-        int ai = leftIdx+dc->start;
-        for (int j=dc->start; j<ai; j++) {
+        uint32_t ai = leftIdx+dc->start;
+        for (uint32_t j=dc->start; j<ai; j++) {
             BBox combined = Union(clusters[leftIdx]->bounds, clusters[j-dc->start]->bounds);
             aacData->area[ai][j] = combined.SurfaceArea();
         }
-        for (int j=ai+1; j<dc->start+clusters.size(); j++) {
+        for (uint32_t j=ai+1; j<dc->start+clusters.size(); j++) {
             BBox combined = Union(clusters[leftIdx]->bounds, clusters[j-dc->start]->bounds);
             aacData->area[j][ai] = combined.SurfaceArea();
         }
@@ -414,10 +384,10 @@ std::vector<BVHBuildNode*> combineCluster(std::vector<BVHBuildNode*> &clusters, 
         clusters.pop_back();
 //        closest.pop_back();
         
-        int bi = rightIdx+dc->start;
-        for (int j=dc->start; j<bi; j++)
+        uint32_t bi = rightIdx+dc->start;
+        for (uint32_t j=dc->start; j<bi; j++)
             aacData->area[bi][j] = aacData->area[dc->start+clusters.size()][j];
-        for (int j=bi+1; j<dc->start+clusters.size(); j++)
+        for (uint32_t j=bi+1; j<dc->start+clusters.size(); j++)
             aacData->area[j][bi] = aacData->area[dc->start+clusters.size()][j];
         
         aacData->minArea[bi] = aacData->minArea[dc->start+clusters.size()];
@@ -425,11 +395,11 @@ std::vector<BVHBuildNode*> combineCluster(std::vector<BVHBuildNode*> &clusters, 
         
         findBestMatch(aacData, dc, clusters.size(), ai);
         
-        for (int i = 0; i < clusters.size(); ++i) {
-            int newI = i+dc->start;
-            if (aacData->minPos[newI] == ai || aacData->minPos[newI] == bi) {
+        for (uint32_t i = 0; i < clusters.size(); ++i) {
+            uint32_t newI = i+dc->start;
+            if (uint32_t(aacData->minPos[newI]) == ai || uint32_t(aacData->minPos[newI]) == bi) {
                 findBestMatch(aacData, dc,clusters.size(), newI);
-            } else if (aacData->minPos[newI] == dc->start+clusters.size()) {
+            } else if (uint32_t(aacData->minPos[newI]) == dc->start+clusters.size()) {
                 aacData->minPos[newI] = bi;
             }
         }
@@ -476,8 +446,10 @@ void aacDataMerge(std::vector<BVHBuildNode*> clusters, AAC_Data *aacData, AAC_Da
     for (int i=start; i<start+len1; i++)
         for (int j=start+len1; j<start+len1+len2; j++) {
             // align i and j to zero for clusters idx
+//            Warning("aacDataMerge Getting Surface Area");
             BBox combined = Union(clusters[i-start]->bounds, clusters[j-start]->bounds);
             float d = combined.SurfaceArea();
+//            Warning("aacDataMerge Done Getting Surface Area");
 
             aacData->area[j][i] = d;
             if (aacData->area[j][i] < aacData->minArea[i]) {
@@ -507,6 +479,7 @@ void recursiveBuildAAC(vector<BVHPrimitiveInfo> &buildData,
     int dim = getDimForMorton3D(partitionBit);
     
     if (end-start < AAC_DELTA) {
+//        baseCaseTimer.Start();
         Assert(coord->start + (end-start) < aacData->size);
         
         std::vector<BVHBuildNode*> clusters;
@@ -520,13 +493,15 @@ void recursiveBuildAAC(vector<BVHPrimitiveInfo> &buildData,
             clusters.push_back(node);
         }
         
-        leafsTimer.Start();
+//        baseCaseTimer.Stop();
+//        
+//        leafsTimer.Start();
         aacSetLeaf(clusters, aacData, *coord);
-        leafsTimer.Stop();
+//        leafsTimer.Stop();
         
-        combineTimer.Start();
+//        combineTimer.Start();
         *clusterData = combineCluster(clusters, AAC_F(AAC_DELTA), totalNodes, dim, aacData, coord);
-        combineTimer.Stop();
+//        combineTimer.Stop();
         return;
     }
     
@@ -548,17 +523,147 @@ void recursiveBuildAAC(vector<BVHPrimitiveInfo> &buildData,
     recursiveBuildAAC(buildData, mortonCodes, splitIdx, end, &rightTotalnodes, newPartionBit, &rightC, aacData, &rightDC);
     
     (*totalNodes) += rightTotalnodes;
+    
+//    appendTimer.Start();
     leftC.insert( leftC.end(), rightC.begin(), rightC.end() );
+//    appendTimer.Stop();
     
     
-    dataMergeTimer.Start();
+//    dataMergeTimer.Start();
     aacDataMerge(leftC, aacData, leftDC, rightDC);
-    dataMergeTimer.Stop();
+//    dataMergeTimer.Stop();
+    
+//    combineTimer.Start();
+    *clusterData = combineCluster(leftC, AAC_F(end-start), totalNodes, dim, aacData, coord);
+//    combineTimer.Stop();
+}
+
+void spawnRecursiveBuild(vector<BVHPrimitiveInfo> &buildData,
+                         std::pair<uint32_t, uint32_t> *mortonCodes,
+                         uint32_t start,
+                         uint32_t end, uint32_t *totalNodes, int partitionBit,
+                         TaskTree* &tt) {
+    
+    if (end-start == 0) {
+        return;
+    }
+    
+    if (MORTON_CODE_START-partitionBit > AAC_PARALLEL_GRAN) {
+        AAC_Data *aac_data = new AAC_Data;
+        float minSize = float(AAC_DELTA/2);
+        int dataSize = 4*int(minSize * pow((end-start), 0.5-AAC_EPSILON/2) + 1e-5);
+        aac_data->init(dataSize);
+        
+        AAC_DataCoord coord = AAC_DataCoord(0, dataSize);
+        std::vector<BVHBuildNode*> *clusters = new std::vector<BVHBuildNode*>();
+        
+        recursiveBuildAAC(buildData, mortonCodes, start, end, totalNodes,
+                          MORTON_CODE_START, clusters, aac_data, &coord);
+        
+        
+        
+        tt = new TaskTree();
+        
+        tt->bvhNodes = clusters;
+        tt->aacData = aac_data;
+        tt->aacDataC = coord;
+        tt->numPrims = end-start;
+        
+        return;
+    }
     
     
-    combineTimer.Start();
-    *clusterData = combineCluster(leftC, AAC_F(buildData.size()), totalNodes, dim, aacData, coord);
-    combineTimer.Stop();
+    uint32_t splitIdx = makePartition(mortonCodes, start, end, partitionBit);
+    
+    int newPartionBit = partitionBit - 1;
+    uint32_t rightTotalnodes = 0;
+    
+    tt = new TaskTree();
+    
+    cilk_spawn spawnRecursiveBuild(buildData, mortonCodes, start, splitIdx, totalNodes, newPartionBit, (tt->leftNode));
+    spawnRecursiveBuild(buildData, mortonCodes, splitIdx, end, &rightTotalnodes, newPartionBit, (tt->rightNode));
+    cilk_sync;
+    
+    (*totalNodes) += rightTotalnodes;
+}
+
+void sequentialBuild(uint32_t *numPrims, uint32_t *totalNodes, int partitionBit,
+                     std::vector<BVHBuildNode*> *clusterData,
+                     AAC_Data *aacData, AAC_DataCoord *coord,
+                     TaskTree* tt) {
+    
+    int dim = getDimForMorton3D(partitionBit);
+    int newPartionBit = partitionBit - 1;
+    
+    if (!(tt->leftNode) && !(tt->rightNode)) {
+//        Warning("sequentialBuild: IN BASE CASE");
+        // push back clusterData
+        *clusterData = *(tt->bvhNodes);
+        
+        AAC_Data *srcData = tt->aacData;
+        AAC_DataCoord sdc = tt->aacDataC;
+        
+        Assert(coord->start + (sdc.end - sdc.start) <= coord->end);
+        
+        // fill in coordinates
+        coord->end = coord->start + (sdc.end - sdc.start);
+        
+//        Warning("sequentialBuild: fill in aacData");
+        // fill in aacData
+        for (int i=sdc.start; i<sdc.end; i++)  {
+            int destI = coord->start + (i - sdc.start);
+//            Warning("sequentialBuild: fill in aacData AREA");
+            for (int j=sdc.start; j<i; j++) {
+                int destJ = coord->start + (j - sdc.start);
+                aacData->area[destI][destJ] = srcData->area[i][j];
+            }
+            // i think minpos is wrong
+//            Warning("sequentialBuild: fill in aacData MINPOS AND MIN AREA");
+            aacData->minArea[destI] = srcData->minArea[i];
+            aacData->minPos[destI] = srcData->minPos[i] + coord->start;
+        }
+        
+        (*numPrims) += tt->numPrims;
+        
+//        Warning("sequentialBuild: EXIT BASE CASE");
+        delete tt;
+        
+        return;
+    } else if (!(tt->rightNode)) {
+        sequentialBuild(numPrims, totalNodes, newPartionBit, clusterData, aacData, coord, tt->leftNode);
+        delete tt;
+        return;
+    } else if (!(tt->leftNode)) {
+        sequentialBuild(numPrims, totalNodes, newPartionBit, clusterData, aacData, coord, tt->rightNode);
+        delete tt;
+        return;
+    }
+    
+    std::vector<BVHBuildNode*> leftC;
+    std::vector<BVHBuildNode*> rightC;
+    
+    // do left
+//    Warning("sequentialBuild: BEGIN LEFT");
+    AAC_DataCoord leftDC = AAC_DataCoord(*coord);
+    
+    sequentialBuild(numPrims, totalNodes, newPartionBit, &leftC, aacData, &leftDC, tt->leftNode);
+    
+    // do right
+//    Warning("sequentialBuild: BEGIN RIGHT");
+    AAC_DataCoord rightDC = AAC_DataCoord(*coord);
+    rightDC.start = leftDC.end;
+    sequentialBuild(numPrims, totalNodes, newPartionBit, &rightC, aacData, &rightDC, tt->rightNode);
+    
+//    Warning("sequentialBuild: BEGIN APPEND");
+    leftC.insert( leftC.end(), rightC.begin(), rightC.end() );
+//    Warning("sequentialBuild: END APPEND");
+    
+//    Warning("sequentialBuild: BEGIN MERGE");
+    aacDataMerge(leftC, aacData, leftDC, rightDC);
+//    Warning("sequentialBuild: END MERGE");
+    
+    *clusterData = combineCluster(leftC, AAC_F(*numPrims), totalNodes, dim, aacData, coord);
+    delete tt;
 }
 
 
@@ -617,28 +722,66 @@ void BVHAccel::buildAAC(vector<BVHPrimitiveInfo> &buildData, uint32_t start,
     integerSort(mortonCodes, (long) (end-start));
     rootTimer.Stop();
     Warning("Elapsed time to sort morton codes: %.2f seconds\n", rootTimer.Time());
+    rootTimer.Reset();
 //    std::sort(mortonCodes, mortonCodes+(end-start));
     
-    rootTimer.Reset();
-    rootTimer.Start();
-    AAC_Data aac_data;
     float minSize = float(AAC_DELTA/2);
-//    int dataSize = 4*int(minSize*pow(end-start/2.0/minSize, 0.5-AAC_ALPHA/2)+1e-5);
-    int dataSize = end-start;
+    int dataSize = 4*int(minSize*pow((end-start), 0.5-AAC_EPSILON/2)+1e-5);
+    
+    TaskTree *tt;
+    rootTimer.Start();
+    spawnRecursiveBuild(buildData, mortonCodes, start, end, totalNodes, MORTON_CODE_START, tt);
+    rootTimer.Stop();
+    Warning("Elapsed time to spawnRecursiveBuild: %.2f seconds\n", rootTimer.Time());
+    rootTimer.Reset();
+    
+    uint32_t numPrims = 0;
+    AAC_Data aac_data;
+    rootTimer.Start();
     aac_data.init(dataSize);
+    rootTimer.Stop();
+    Warning("Elapsed time to init aac_data: %.2f seconds\n", rootTimer.Time());
+    rootTimer.Reset();
     AAC_DataCoord coord = AAC_DataCoord(0, dataSize);
     std::vector<BVHBuildNode*> clusters;
-    recursiveBuildAAC(buildData, mortonCodes, start, end, totalNodes,
-                      MORTON_CODE_START, &clusters, &aac_data, &coord);
+    
+    
+    rootTimer.Start();
+    
+    sequentialBuild(&numPrims, totalNodes, MORTON_CODE_START, &clusters, &aac_data, &coord, tt);
     
     rootTimer.Stop();
-    Warning("Elapsed time to recursive build: %.2f seconds\n", rootTimer.Time());
-    Warning("Elapsed time to combine clusters: %.2f seconds\n", combineTimer.Time());
-    Warning("Elapsed time to make Leafs: %.2f seconds\n", leafsTimer.Time());
-    Warning("Elapsed time to merge data: %.2f seconds\n", dataMergeTimer.Time());
+    Warning("Elapsed time to sequentialBuild: %.2f seconds\n", rootTimer.Time());
+    rootTimer.Reset();
+    
+//    AAC_Data aac_data;
+//    int dataSize = end-start;
+    
+//    rootTimer.Start();
+//    aac_data.init(dataSize);
+//    rootTimer.Stop();
+//    Warning("Elapsed time to init aac_data: %.2f seconds\n", rootTimer.Time());
+//    rootTimer.Reset();
+//    
+//    AAC_DataCoord coord = AAC_DataCoord(0, dataSize);
+//    std::vector<BVHBuildNode*> clusters;
+//    
+//    rootTimer.Start();
+//    recursiveBuildAAC(buildData, mortonCodes, start, end, totalNodes,
+//                      MORTON_CODE_START, &clusters, &aac_data, &coord);
+    
+//    rootTimer.Stop();
+//    Warning("Elapsed time to recursive build: %.2f seconds\n", rootTimer.Time());
+//    Warning("Elapsed time to combine clusters: %.2f seconds\n", combineTimer.Time());
+//    Warning("Elapsed time to make Leafs: %.2f seconds\n", leafsTimer.Time());
+//    Warning("Elapsed time to merge data: %.2f seconds\n", dataMergeTimer.Time());
+//    Warning("Elapsed time to append data: %.2f seconds\n", appendTimer.Time());
+//    Warning("Elapsed time to base case: %.2f seconds\n", baseCaseTimer.Time());
     rootTimer.Reset();
     
     rootTimer.Start();
+//    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2, &aac_data, &coord)[0];
+//    *totalNodes = faketotalNodes;
     BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2, &aac_data, &coord)[0];
     rootTimer.Stop();
     Warning("Elapsed time to combine to root cluster: %.2f seconds\n", rootTimer.Time());
