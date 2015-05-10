@@ -626,16 +626,16 @@ void sequentialBuild(uint32_t *numPrims, uint32_t *totalNodes, int partitionBit,
         (*numPrims) += tt->numPrims;
         
 //        Warning("sequentialBuild: EXIT BASE CASE");
-        delete tt;
+//        delete tt;
         
         return;
     } else if (!(tt->rightNode)) {
         sequentialBuild(numPrims, totalNodes, newPartionBit, clusterData, aacData, coord, tt->leftNode);
-        delete tt;
+//        delete tt;
         return;
     } else if (!(tt->leftNode)) {
         sequentialBuild(numPrims, totalNodes, newPartionBit, clusterData, aacData, coord, tt->rightNode);
-        delete tt;
+//        delete tt;
         return;
     }
     
@@ -663,7 +663,7 @@ void sequentialBuild(uint32_t *numPrims, uint32_t *totalNodes, int partitionBit,
 //    Warning("sequentialBuild: END MERGE");
     
     *clusterData = combineCluster(leftC, AAC_F(*numPrims), totalNodes, dim, aacData, coord);
-    delete tt;
+//    delete tt;
 }
 
 
