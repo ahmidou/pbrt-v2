@@ -424,7 +424,7 @@ void recursiveBuildAAC(vector<BVHPrimitiveInfo> &buildData,
     (*totalNodes) += rightTotalnodes;
     
     leftC.insert( leftC.end(), rightC.begin(), rightC.end() );
-    *clusterData = combineCluster(leftC, AAC_F(buildData.size()), totalNodes, dim);
+    *clusterData = combineCluster(leftC, AAC_F(end-start), totalNodes, dim);
 }
 
 
