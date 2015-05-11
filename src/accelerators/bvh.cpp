@@ -862,49 +862,49 @@ void BVHAccel::buildAAC(vector<BVHPrimitiveInfo> &buildData, uint32_t start,
     rootTimer.Reset();
     std::sort(mortonCodes, mortonCodes+(end-start));
     
-    float minSize = float(AAC_DELTA/2);
-    int dataSize = 4*int(minSize*pow((end-start), 0.5-AAC_EPSILON/2)+1e-5);
+//    float minSize = float(AAC_DELTA/2);
+//    int dataSize = 4*int(minSize*pow((end-start), 0.5-AAC_EPSILON/2)+1e-5);
     
-    TaskTree *tt;
-    rootTimer.Start();
-    spawnRecursiveBuild(buildData, mortonCodes, start, end, totalNodes, MORTON_CODE_START, tt);
-    rootTimer.Stop();
-    Warning("Elapsed time to spawnRecursiveBuild: %.2f seconds\n", rootTimer.Time());
-    rootTimer.Reset();
-    
-    uint32_t numPrims = 0;
-    AAC_Data aac_data;
-    rootTimer.Start();
-    aac_data.init(dataSize);
-    rootTimer.Stop();
-    Warning("Elapsed time to init aac_data: %.2f seconds\n", rootTimer.Time());
-    rootTimer.Reset();
-    AAC_DataCoord coord = AAC_DataCoord(0, dataSize);
-    std::vector<BVHBuildNode*> clusters;
-    
-    
-    rootTimer.Start();
-    
-    sequentialBuild(&numPrims, totalNodes, MORTON_CODE_START, &clusters, &aac_data, &coord, tt);
-    
-    rootTimer.Stop();
-    Warning("Elapsed time to sequentialBuild: %.2f seconds\n", rootTimer.Time());
-    rootTimer.Reset();
-    
-    //HYBRID
 //    TaskTree *tt;
 //    rootTimer.Start();
-//    Warning("START HYBRID BUILD");
-//    hybridRecursiveBuild(buildData, mortonCodes, start, end, totalNodes, MORTON_CODE_START, tt);
+//    spawnRecursiveBuild(buildData, mortonCodes, start, end, totalNodes, MORTON_CODE_START, tt);
 //    rootTimer.Stop();
 //    Warning("Elapsed time to spawnRecursiveBuild: %.2f seconds\n", rootTimer.Time());
 //    rootTimer.Reset();
 //    
-//    std::vector<BVHBuildNode*> clusters = *(tt->bvhNodes);
+//    uint32_t numPrims = 0;
+//    AAC_Data aac_data;
+//    rootTimer.Start();
+//    aac_data.init(dataSize);
+//    rootTimer.Stop();
+//    Warning("Elapsed time to init aac_data: %.2f seconds\n", rootTimer.Time());
+//    rootTimer.Reset();
+//    AAC_DataCoord coord = AAC_DataCoord(0, dataSize);
+//    std::vector<BVHBuildNode*> clusters;
 //    
-//    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2)[0];
+//    
+//    rootTimer.Start();
+//    
+//    sequentialBuild(&numPrims, totalNodes, MORTON_CODE_START, &clusters, &aac_data, &coord, tt);
+//    
+//    rootTimer.Stop();
+//    Warning("Elapsed time to sequentialBuild: %.2f seconds\n", rootTimer.Time());
+//    rootTimer.Reset();
     
     //HYBRID
+    TaskTree *tt;
+    rootTimer.Start();
+    Warning("START HYBRID BUILD");
+    hybridRecursiveBuild(buildData, mortonCodes, start, end, totalNodes, MORTON_CODE_START, tt);
+    rootTimer.Stop();
+    Warning("Elapsed time to spawnRecursiveBuild: %.2f seconds\n", rootTimer.Time());
+    rootTimer.Reset();
+    
+    std::vector<BVHBuildNode*> clusters = *(tt->bvhNodes);
+    
+    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2)[0];
+    
+    //HYBRID END FUCK YOU BRIAN
     
 //    AAC_Data aac_data;
 //    int dataSize = end-start;
@@ -935,7 +935,7 @@ void BVHAccel::buildAAC(vector<BVHPrimitiveInfo> &buildData, uint32_t start,
 //    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2, &aac_data, &coord)[0];
 //    *totalNodes = faketotalNodes;
     // use 2 for dim because start with z axis
-    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2, &aac_data, &coord)[0];
+//    BVHBuildNode* root = combineCluster(clusters, 1, totalNodes, 2, &aac_data, &coord)[0];
 //    rootTimer.Stop();
 //    Warning("Elapsed time to combine to root cluster: %.2f seconds\n", rootTimer.Time());
 //    rootTimer.Reset();
